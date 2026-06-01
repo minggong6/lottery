@@ -440,6 +440,38 @@
             display: none;
         }
 
+        .supp-draw {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .supp-draw input {
+            font-family: inherit;
+            width: clamp(48px, 4.5vw, 80px);
+            height: clamp(34px, 4.8vh, 56px);
+            padding: 0 8px;
+            border: 1px solid rgba(239, 226, 205, 0.28);
+            border-radius: 18px;
+            color: var(--gold);
+            background: rgba(20, 8, 6, 0.6);
+            font-size: clamp(14px, 1.05vw, 22px);
+            font-weight: 800;
+            text-align: center;
+            outline: none;
+            transition: 0.18s ease;
+        }
+
+        .supp-draw input:focus {
+            border-color: rgba(255, 189, 74, 0.62);
+            box-shadow: 0 0 12px rgba(230, 138, 24, 0.22);
+        }
+
+        .supp-draw input::placeholder {
+            color: var(--muted);
+            font-weight: 400;
+        }
+
         .modal {
             position: fixed;
             inset: 0;
@@ -562,6 +594,10 @@
                 <button data-prize="三等奖" onclick="startDraw(20, '三等奖')">三等奖 · 抽 20</button>
                 <button data-prize="二等奖" onclick="startDraw(5, '二等奖')">二等奖 · 抽 5</button>
                 <button data-prize="一等奖" onclick="startDraw(4, '一等奖')">一等奖 · 抽 4</button>
+                <div class="supp-draw">
+                    <input type="number" id="suppCount" min="1" max="500" placeholder="个数" value="1">
+                    <button data-supp onclick="startSuppDraw()">补抽</button>
+                </div>
             </div>
             <div class="secondary-actions">
                 <button class="ghost" onclick="showRecords()">查看记录</button>
@@ -755,7 +791,7 @@
             }
 
             isDrawing = true;
-            document.querySelectorAll('.controls button').forEach(btn => btn.disabled = true);
+            document.querySelectorAll('.controls button:not([data-supp])').forEach(btn => btn.disabled = true);
             focusTitle.textContent = roundName;
 
             const winners = pickWinners(count);
@@ -773,7 +809,46 @@
             focusTitle.textContent = `${roundName}完成`;
             focusSeat.textContent = `${winners.length} 位`;
             isDrawing = false;
-            document.querySelectorAll('.controls button').forEach(btn => btn.disabled = false);
+            document.querySelectorAll('.controls button:not([data-supp])').forEach(btn => btn.disabled = false);
+            updatePrizeButtons();
+            showWinnerModal(winners);
+        }
+
+        async function startSuppDraw() {
+            const input = document.getElementById('suppCount');
+            const count = parseInt(input.value, 10);
+            if (!count || count < 1) {
+                alert('请输入有效的补抽个数');
+                return;
+            }
+            if (availableSeats.length < count) {
+                alert(`剩余奖券不足，仅剩 ${availableSeats.length} 张`);
+                return;
+            }
+
+            const suppIndex = history.filter(item => item.roundName.startsWith('补抽')).length + 1;
+            const roundName = `补抽${suppIndex}`;
+
+            isDrawing = true;
+            document.querySelectorAll('.controls button:not([data-supp])').forEach(btn => btn.disabled = true);
+            focusTitle.textContent = roundName;
+
+            const winners = pickWinners(count);
+            const batches = [];
+            for (let i = 0; i < winners.length; i += BATCH_SIZE) {
+                batches.push(winners.slice(i, i + BATCH_SIZE));
+            }
+
+            for (let i = 0; i < batches.length; i++) {
+                await runBatchDraw(batches[i], i + 1, batches.length);
+                updateStats();
+            }
+
+            saveRecord(roundName, count, winners);
+            focusTitle.textContent = `${roundName}完成`;
+            focusSeat.textContent = `${winners.length} 位`;
+            isDrawing = false;
+            document.querySelectorAll('.controls button:not([data-supp])').forEach(btn => btn.disabled = false);
             updatePrizeButtons();
             showWinnerModal(winners);
         }
@@ -851,6 +926,7 @@
                 button.textContent = `${button.dataset.prize} · 抽 ${count}`;
                 button.disabled = false;
             });
+            document.getElementById('suppCount').value = 1;
             updateStats();
         }
 
