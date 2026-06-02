@@ -632,6 +632,11 @@
         let availableSeats = [];
         let history = [];
         let isDrawing = false;
+        let isRolling = false;
+        let pendingWinners = null;
+        let pendingRoundName = '';
+        let pendingCount = 0;
+        let rollTimer = null;
 
         const seatWrap = document.getElementById('seatWrap');
         const focusTitle = document.getElementById('focusTitle');
@@ -749,41 +754,36 @@
             document.querySelectorAll('.seat.flash').forEach(el => el.classList.remove('flash'));
         }
 
-        async function runBatchDraw(batchWinners, batchIndex, batchTotal) {
-            const count = batchWinners.length;
-            const steps = 26;
-            focusTitle.textContent = batchTotal > 1 ? `正在抽取 ${batchIndex}/${batchTotal}` : '正在抽取';
-
-            for (let i = 0; i < steps; i++) {
+        function startRolling(count) {
+            isRolling = true;
+            function tick() {
+                if (!isRolling) return;
                 clearFlash();
                 randomSeats(count).forEach(name => {
                     const el = getSeatEl(name);
                     if (el) el.classList.add('flash');
                 });
                 focusSeat.textContent = count >= 10 ? `${count} 位` : randomSeats(1)[0] || '--排--座';
-                const progress = i / steps;
-                await sleep(22 + progress * progress * 52);
+                rollTimer = setTimeout(tick, 50);
             }
+            tick();
+        }
 
+        function stopRolling() {
+            isRolling = false;
+            if (rollTimer) { clearTimeout(rollTimer); rollTimer = null; }
             clearFlash();
-            batchWinners.forEach(name => {
-                const el = getSeatEl(name);
-                if (el) el.classList.add('flash');
-            });
-            focusSeat.textContent = `${count} 位`;
-            await sleep(520);
-            batchWinners.forEach(name => {
-                const el = getSeatEl(name);
-                if (el) {
-                    el.classList.remove('flash');
-                    el.classList.add('winner');
-                }
-            });
-            await sleep(260);
         }
 
         async function startDraw(count, roundName) {
-            if (isDrawing) return;
+            if (isDrawing) {
+                // already rolling — this click means "stop"
+                if (isRolling) {
+                    stopRolling();
+                    await revealWinners();
+                }
+                return;
+            }
             if (history.some(item => item.roundName === roundName)) return;
             if (availableSeats.length < count) {
                 alert(`剩余奖券不足，仅剩 ${availableSeats.length} 张`);
@@ -791,30 +791,62 @@
             }
 
             isDrawing = true;
-            document.querySelectorAll('.controls button:not([data-supp])').forEach(btn => btn.disabled = true);
+            pendingRoundName = roundName;
+            pendingCount = count;
+            pendingWinners = pickWinners(count);
+
+            // Disable all buttons except the active one
+            document.querySelectorAll('.controls button').forEach(btn => btn.disabled = true);
+            const activeBtn = document.querySelector(`[data-prize="${roundName}"]`);
+            if (activeBtn) {
+                activeBtn.disabled = false;
+                activeBtn.textContent = '停止';
+            }
+
             focusTitle.textContent = roundName;
+            startRolling(count);
+        }
 
-            const winners = pickWinners(count);
-            const batches = [];
-            for (let i = 0; i < winners.length; i += BATCH_SIZE) {
-                batches.push(winners.slice(i, i + BATCH_SIZE));
-            }
+        async function revealWinners() {
+            const winners = pendingWinners;
+            const count = pendingCount;
+            const roundName = pendingRoundName;
 
-            for (let i = 0; i < batches.length; i++) {
-                await runBatchDraw(batches[i], i + 1, batches.length);
-                updateStats();
-            }
+            // Highlight winners
+            winners.forEach(name => {
+                const el = getSeatEl(name);
+                if (el) el.classList.add('flash');
+            });
+            focusSeat.textContent = `${count} 位`;
+            await sleep(520);
+            winners.forEach(name => {
+                const el = getSeatEl(name);
+                if (el) {
+                    el.classList.remove('flash');
+                    el.classList.add('winner');
+                }
+            });
+            await sleep(260);
 
             saveRecord(roundName, count, winners);
             focusTitle.textContent = `${roundName}完成`;
             focusSeat.textContent = `${winners.length} 位`;
             isDrawing = false;
-            document.querySelectorAll('.controls button:not([data-supp])').forEach(btn => btn.disabled = false);
+            pendingWinners = null;
+            document.querySelectorAll('.controls button').forEach(btn => btn.disabled = false);
             updatePrizeButtons();
             showWinnerModal(winners);
         }
 
         async function startSuppDraw() {
+            // If already rolling from a supp draw, stop it
+            if (isDrawing && isRolling && pendingRoundName.startsWith('补抽')) {
+                stopRolling();
+                await revealWinners();
+                return;
+            }
+            if (isDrawing) return;
+
             const input = document.getElementById('suppCount');
             const count = parseInt(input.value, 10);
             if (!count || count < 1) {
@@ -830,27 +862,19 @@
             const roundName = `补抽${suppIndex}`;
 
             isDrawing = true;
-            document.querySelectorAll('.controls button:not([data-supp])').forEach(btn => btn.disabled = true);
+            pendingRoundName = roundName;
+            pendingCount = count;
+            pendingWinners = pickWinners(count);
+
+            document.querySelectorAll('.controls button').forEach(btn => btn.disabled = true);
+            const suppBtn = document.querySelector('[data-supp]');
+            if (suppBtn) {
+                suppBtn.disabled = false;
+                suppBtn.textContent = '停止';
+            }
+
             focusTitle.textContent = roundName;
-
-            const winners = pickWinners(count);
-            const batches = [];
-            for (let i = 0; i < winners.length; i += BATCH_SIZE) {
-                batches.push(winners.slice(i, i + BATCH_SIZE));
-            }
-
-            for (let i = 0; i < batches.length; i++) {
-                await runBatchDraw(batches[i], i + 1, batches.length);
-                updateStats();
-            }
-
-            saveRecord(roundName, count, winners);
-            focusTitle.textContent = `${roundName}完成`;
-            focusSeat.textContent = `${winners.length} 位`;
-            isDrawing = false;
-            document.querySelectorAll('.controls button:not([data-supp])').forEach(btn => btn.disabled = false);
-            updatePrizeButtons();
-            showWinnerModal(winners);
+            startRolling(count);
         }
 
         function saveRecord(roundName, count, winners) {
