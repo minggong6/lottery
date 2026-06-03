@@ -717,11 +717,12 @@
         }
 
         function updatePrizeButtons() {
-            const drawnPrizes = new Set(history.map(item => item.roundName));
             document.querySelectorAll('[data-prize]').forEach(button => {
-                const used = drawnPrizes.has(button.dataset.prize);
-                button.disabled = used || isDrawing;
-                if (used) button.textContent = `${button.dataset.prize} · 已抽取`;
+                const prize = button.dataset.prize;
+                const count = prize === '三等奖' ? 20 : prize === '二等奖' ? 5 : 4;
+                const times = history.filter(item => item.roundName === prize).length;
+                button.disabled = isDrawing;
+                button.textContent = times > 0 ? `${prize} · 抽 ${count}（第${times + 1}轮）` : `${prize} · 抽 ${count}`;
             });
         }
 
@@ -777,25 +778,25 @@
 
         async function startDraw(count, roundName) {
             if (isDrawing) {
-                // already rolling — this click means "stop"
                 if (isRolling) {
                     stopRolling();
                     await revealWinners();
                 }
                 return;
             }
-            if (history.some(item => item.roundName === roundName)) return;
             if (availableSeats.length < count) {
                 alert(`剩余奖券不足，仅剩 ${availableSeats.length} 张`);
                 return;
             }
 
+            const times = history.filter(item => item.roundName === roundName).length;
+            const actualRoundName = times > 0 ? `${roundName}（第${times + 1}轮）` : roundName;
+
             isDrawing = true;
-            pendingRoundName = roundName;
+            pendingRoundName = actualRoundName;
             pendingCount = count;
             pendingWinners = pickWinners(count);
 
-            // Disable all buttons except the active one
             document.querySelectorAll('.controls button').forEach(btn => btn.disabled = true);
             const activeBtn = document.querySelector(`[data-prize="${roundName}"]`);
             if (activeBtn) {
@@ -803,7 +804,7 @@
                 activeBtn.textContent = '停止';
             }
 
-            focusTitle.textContent = roundName;
+            focusTitle.textContent = actualRoundName;
             startRolling(count);
         }
 
@@ -829,11 +830,14 @@
             await sleep(260);
 
             saveRecord(roundName, count, winners);
+            updateStats();
             focusTitle.textContent = `${roundName}完成`;
             focusSeat.textContent = `${winners.length} 位`;
             isDrawing = false;
             pendingWinners = null;
             document.querySelectorAll('.controls button').forEach(btn => btn.disabled = false);
+            const suppBtn = document.querySelector('[data-supp]');
+            if (suppBtn) suppBtn.textContent = '补抽';
             updatePrizeButtons();
             showWinnerModal(winners);
         }
@@ -946,11 +950,12 @@
             focusTitle.textContent = '等待抽奖';
             focusSeat.textContent = '--排--座';
             document.querySelectorAll('[data-prize]').forEach(button => {
-                const count = button.dataset.prize === '三等奖' ? 20 : button.dataset.prize === '二等奖' ? 5 : 4;
-                button.textContent = `${button.dataset.prize} · 抽 ${count}`;
                 button.disabled = false;
             });
+            const suppBtn = document.querySelector('[data-supp]');
+            if (suppBtn) suppBtn.textContent = '补抽';
             document.getElementById('suppCount').value = 1;
+            updatePrizeButtons();
             updateStats();
         }
 
